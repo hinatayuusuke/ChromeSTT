@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome STT",
+  "description": "Voice input via Web Speech API with Japanese-friendly controls.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_permissions": ["microphone"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/contentScript.js"],
+      "css": ["src/contentStyles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle-voice-input": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Period",
+        "mac": "Command+Shift+Period"
+      },
+      "description": "Toggle voice input"
+    }
+  ],
+  "action": {
+    "default_title": "Chrome STT"
+  }
+}

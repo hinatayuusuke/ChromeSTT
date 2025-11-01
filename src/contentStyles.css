@@ -1,0 +1,98 @@
+.chrome-stt-root {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.chrome-stt-button {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  border: none;
+  background: #1f2937;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  padding: 0;
+}
+
+.chrome-stt-button:hover,
+.chrome-stt-button:focus-visible {
+  transform: translateY(-2px);
+  background: #2563eb;
+  outline: none;
+}
+
+.chrome-stt-button:disabled {
+  cursor: not-allowed;
+  background: #475569;
+  box-shadow: none;
+}
+
+.chrome-stt-button__icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: currentColor;
+  display: block;
+  position: relative;
+}
+
+.chrome-stt-button__icon::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 12px;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.chrome-stt-button__label {
+  font-size: 10px;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+
+.chrome-stt-button--listening {
+  background: #dc2626;
+  box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.35), 0 15px 30px rgba(220, 38, 38, 0.35);
+}
+
+.chrome-stt-status {
+  min-width: 160px;
+  max-width: 320px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.chrome-stt-status--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.chrome-stt-status--error {
+  background: rgba(153, 27, 27, 0.92);
+}

@@ -39,90 +39,100 @@
   ]);
 
   const dom = buildUi();
+  setUiVisible(false);
 
-  if (!SpeechRecognition) {
+  const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+  if (!recognition) {
     dom.status.textContent =
       "このブラウザは音声認識（Web Speech API）に対応していません。";
     dom.status.classList.add("chrome-stt-status--error");
     dom.button.disabled = true;
-    return;
+  } else {
+    recognition.lang = "ja-JP";
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.continuous = true;
   }
-
-  const recognition = new SpeechRecognition();
-  recognition.lang = "ja-JP";
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-  recognition.continuous = true;
 
   let isActive = false;
   let manuallyStopping = false;
   let lastInterimText = "";
 
-  recognition.onstart = () => {
-    dom.button.classList.add("chrome-stt-button--listening");
-    dom.status.textContent = "音声入力中…";
-    dom.status.classList.remove("chrome-stt-status--error");
-    dom.status.classList.add("chrome-stt-status--visible");
-  };
-
-  recognition.onerror = (event) => {
-    dom.status.textContent = `音声認識エラー: ${event.error}`;
-    dom.status.classList.add("chrome-stt-status--error");
-    stopRecognitionInternal(true);
-  };
-
-  recognition.onend = () => {
-    dom.button.classList.remove("chrome-stt-button--listening");
-    if (isActive && !manuallyStopping) {
-      // Chrome stops recognition automatically after a pause; restart to keep listening.
-      safeStart();
-      return;
-    }
-    isActive = false;
-    manuallyStopping = false;
-    dom.status.textContent = "音声入力は停止しました。";
-    lastInterimText = "";
-    setTimeout(() => {
-      if (!isActive) {
-        dom.status.classList.remove("chrome-stt-status--visible");
-      }
-    }, 1500);
-  };
-
-  recognition.onresult = (event) => {
-    let finalTextBuffer = "";
-    let interimTextBuffer = "";
-
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const result = event.results[i];
-      const { transcript } = result[0];
-      if (result.isFinal) {
-        const converted = applyTextConversions(transcript);
-        if (converted.type === "command" && converted.payload === "\n") {
-          insertLineBreak();
-        } else {
-          commitText(converted.payload);
-        }
-        finalTextBuffer += converted.display;
-      } else {
-        interimTextBuffer += transcript;
-      }
-    }
-
-    if (interimTextBuffer) {
-      lastInterimText = interimTextBuffer;
-      dom.status.textContent = `${interimTextBuffer} …`;
+  if (recognition) {
+    recognition.onstart = () => {
+      dom.button.classList.add("chrome-stt-button--listening");
+      dom.status.textContent = "音声入力中…";
+      dom.status.classList.remove("chrome-stt-status--error");
       dom.status.classList.add("chrome-stt-status--visible");
-    } else if (finalTextBuffer) {
-      dom.status.textContent = finalTextBuffer;
-      dom.status.classList.add("chrome-stt-status--visible");
+    };
+
+    recognition.onerror = (event) => {
+      dom.status.textContent = `音声認識エラー: ${event.error}`;
+      dom.status.classList.add("chrome-stt-status--error");
+      stopRecognitionInternal(true);
+    };
+
+    recognition.onend = () => {
+      dom.button.classList.remove("chrome-stt-button--listening");
+      if (isActive && !manuallyStopping) {
+        // Chrome stops recognition automatically after a pause; restart to keep listening.
+        safeStart();
+        return;
+      }
+      isActive = false;
+      manuallyStopping = false;
+      dom.status.textContent = "音声入力は停止しました。";
       lastInterimText = "";
-    }
-  };
+      setTimeout(() => {
+        if (!isActive) {
+          dom.status.classList.remove("chrome-stt-status--visible");
+        }
+      }, 1500);
+    };
+
+    recognition.onresult = (event) => {
+      let finalTextBuffer = "";
+      let interimTextBuffer = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const { transcript } = result[0];
+        if (result.isFinal) {
+          const converted = applyTextConversions(transcript);
+          if (converted.type === "command" && converted.payload === "\n") {
+            insertLineBreak();
+          } else {
+            commitText(converted.payload);
+          }
+          finalTextBuffer += converted.display;
+        } else {
+          interimTextBuffer += transcript;
+        }
+      }
+
+      if (interimTextBuffer) {
+        lastInterimText = interimTextBuffer;
+        dom.status.textContent = `${interimTextBuffer} …`;
+        dom.status.classList.add("chrome-stt-status--visible");
+      } else if (finalTextBuffer) {
+        dom.status.textContent = finalTextBuffer;
+        dom.status.classList.add("chrome-stt-status--visible");
+        lastInterimText = "";
+      }
+    };
+  }
 
   dom.button.addEventListener("click", () => {
     toggleRecognition();
   });
+  dom.button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+
+  document.addEventListener("focusin", handleFocusChange, true);
+  document.addEventListener("focusout", handleFocusChange, true);
+  handleFocusChange();
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "TOGGLE_RECOGNITION") {
@@ -134,6 +144,9 @@
   });
 
   function toggleRecognition() {
+    if (!recognition) {
+      return;
+    }
     if (isActive) {
       stopRecognitionInternal(false);
     } else {
@@ -145,6 +158,12 @@
     if (isActive) {
       return;
     }
+    if (!recognition) {
+      return;
+    }
+    if (!getEditableTarget()) {
+      return;
+    }
     isActive = true;
     manuallyStopping = false;
     updateButtonState(true);
@@ -152,6 +171,9 @@
   }
 
   function safeStart() {
+    if (!recognition) {
+      return;
+    }
     try {
       recognition.start();
     } catch (error) {
@@ -169,6 +191,9 @@
     manuallyStopping = !isError;
     isActive = false;
     updateButtonState(false);
+    if (!recognition) {
+      return;
+    }
     try {
       recognition.stop();
     } catch (error) {
@@ -366,5 +391,20 @@
 
   function updateButtonState(active) {
     dom.button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function setUiVisible(visible) {
+    dom.container.classList.toggle("chrome-stt-root--hidden", !visible);
+  }
+
+  function handleFocusChange() {
+    setTimeout(() => {
+      const target = getEditableTarget();
+      const shouldShow = Boolean(target);
+      setUiVisible(shouldShow);
+      if (!shouldShow && isActive) {
+        stopRecognitionInternal(false);
+      }
+    }, 0);
   }
 })();

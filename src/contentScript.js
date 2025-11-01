@@ -260,7 +260,7 @@
       return trimmed;
     }
     // Heuristic: add 。 when ending with polite verbs.
-    if (/[ますですでした]$/.test(trimmed)) {
+    if (/[ますですでしたくださいでしょうか]$/.test(trimmed)) {
       return `${trimmed}。`;
     }
     return trimmed;

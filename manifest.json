@@ -26,7 +26,7 @@
       },
       "description": "Toggle voice input"
     }
-  ],
+  },
   "action": {
     "default_title": "Chrome STT"
   }

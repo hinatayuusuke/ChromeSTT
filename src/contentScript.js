@@ -42,6 +42,7 @@
   setUiVisible(false);
 
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+  const INACTIVITY_TIMEOUT_MS = 3000;
 
   if (!recognition) {
     dom.status.textContent =
@@ -58,6 +59,8 @@
   let isActive = false;
   let manuallyStopping = false;
   let lastInterimText = "";
+  let inactivityTimer = null;
+  let lastStopReason = null;
 
   if (recognition) {
     recognition.onstart = () => {
@@ -65,15 +68,18 @@
       dom.status.textContent = "音声入力中…";
       dom.status.classList.remove("chrome-stt-status--error");
       dom.status.classList.add("chrome-stt-status--visible");
+      lastStopReason = null;
+      resetInactivityTimer();
     };
 
     recognition.onerror = (event) => {
       dom.status.textContent = `音声認識エラー: ${event.error}`;
       dom.status.classList.add("chrome-stt-status--error");
-      stopRecognitionInternal(true);
+      stopRecognitionInternal(true, "error");
     };
 
     recognition.onend = () => {
+      clearInactivityTimer();
       dom.button.classList.remove("chrome-stt-button--listening");
       if (isActive && !manuallyStopping) {
         // Chrome stops recognition automatically after a pause; restart to keep listening.
@@ -82,7 +88,17 @@
       }
       isActive = false;
       manuallyStopping = false;
-      dom.status.textContent = "音声入力は停止しました。";
+      if (lastStopReason === "inactivity") {
+        dom.status.classList.remove("chrome-stt-status--error");
+        dom.status.classList.add("chrome-stt-status--visible");
+        dom.status.textContent = "音声が検出されないため停止しました。";
+      } else if (lastStopReason === "error") {
+        dom.status.classList.add("chrome-stt-status--visible");
+      } else {
+        dom.status.classList.remove("chrome-stt-status--error");
+        dom.status.classList.add("chrome-stt-status--visible");
+        dom.status.textContent = "音声入力は停止しました。";
+      }
       lastInterimText = "";
       setTimeout(() => {
         if (!isActive) {
@@ -110,6 +126,8 @@
           interimTextBuffer += transcript;
         }
       }
+
+      resetInactivityTimer();
 
       if (interimTextBuffer) {
         lastInterimText = interimTextBuffer;
@@ -148,7 +166,7 @@
       return;
     }
     if (isActive) {
-      stopRecognitionInternal(false);
+      stopRecognitionInternal(false, "manual");
     } else {
       startRecognition();
     }
@@ -166,6 +184,7 @@
     }
     isActive = true;
     manuallyStopping = false;
+    lastStopReason = null;
     updateButtonState(true);
     safeStart();
   }
@@ -187,10 +206,12 @@
     }
   }
 
-  function stopRecognitionInternal(isError) {
+  function stopRecognitionInternal(isError, reason) {
     manuallyStopping = !isError;
     isActive = false;
     updateButtonState(false);
+    lastStopReason = reason ?? (isError ? "error" : "manual");
+    clearInactivityTimer();
     if (!recognition) {
       return;
     }
@@ -403,8 +424,34 @@
       const shouldShow = Boolean(target);
       setUiVisible(shouldShow);
       if (!shouldShow && isActive) {
-        stopRecognitionInternal(false);
+        stopRecognitionInternal(false, "manual");
       }
     }, 0);
+  }
+
+  function resetInactivityTimer() {
+    clearInactivityTimer();
+    if (!isActive) {
+      return;
+    }
+    inactivityTimer = setTimeout(handleInactivityTimeout, INACTIVITY_TIMEOUT_MS);
+  }
+
+  function clearInactivityTimer() {
+    if (inactivityTimer !== null) {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = null;
+    }
+  }
+
+  function handleInactivityTimeout() {
+    inactivityTimer = null;
+    if (!isActive) {
+      return;
+    }
+    dom.status.classList.remove("chrome-stt-status--error");
+    dom.status.classList.add("chrome-stt-status--visible");
+    dom.status.textContent = "音声が検出されないため停止します。";
+    stopRecognitionInternal(false, "inactivity");
   }
 })();

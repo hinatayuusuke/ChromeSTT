@@ -42,7 +42,7 @@
   setUiVisible(false);
 
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
-  const INACTIVITY_TIMEOUT_MS = 3000;
+  const INACTIVITY_TIMEOUT_MS = 1500;
 
   if (!recognition) {
     dom.status.textContent =

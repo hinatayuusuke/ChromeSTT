@@ -4,7 +4,6 @@
   "description": "Voice input via Web Speech API with Japanese-friendly controls.",
   "version": "0.1.0",
   "permissions": ["activeTab", "scripting", "storage"],
-  "optional_permissions": ["microphone"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background.js",

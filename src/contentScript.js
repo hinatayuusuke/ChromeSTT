@@ -40,7 +40,7 @@
 
   const dom = buildUi();
   setUiVisible(false);
-  setupUiPositioning();
+  const uiPositioning = setupUiPositioning();
 
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
@@ -59,6 +59,7 @@
   let isActive = false;
   let manuallyStopping = false;
   let lastInterimText = "";
+  let isUiDragging = false;
 
   if (recognition) {
     recognition.onstart = () => {
@@ -140,6 +141,11 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "TOGGLE_RECOGNITION") {
       toggleRecognition();
+      sendResponse({ ok: true });
+      return true;
+    }
+    if (message?.type === "RESET_UI_POSITION") {
+      uiPositioning?.resetPosition();
       sendResponse({ ok: true });
       return true;
     }
@@ -436,6 +442,8 @@
           return;
         }
         dragState.dragging = true;
+        isUiDragging = true;
+        setUiVisible(true);
         dom.container.classList.add("chrome-stt-root--dragging");
       }
       schedulePositionUpdate(dragState.originX + deltaX, dragState.originY + deltaY);
@@ -462,11 +470,6 @@
       endDrag();
     });
 
-    dom.container.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      resetPosition();
-    });
-
     window.addEventListener("resize", () => {
       if (!storedPosition) {
         return;
@@ -481,11 +484,13 @@
       }
       dragState.pointerId = null;
       dragState.dragging = false;
+      isUiDragging = false;
       dom.container.classList.remove("chrome-stt-root--dragging");
       if (dragState.rafId) {
         cancelAnimationFrame(dragState.rafId);
         dragState.rafId = 0;
       }
+      handleFocusChange();
     }
 
     function schedulePositionUpdate(x, y) {
@@ -561,6 +566,19 @@
         Number.isFinite(position.y)
       );
     }
+
+    function refreshPosition() {
+      if (!storedPosition) {
+        return;
+      }
+      const clamped = clampPosition(storedPosition.x, storedPosition.y);
+      applyPosition(clamped, false);
+    }
+
+    return {
+      resetPosition,
+      refreshPosition
+    };
   }
 
   function updateButtonState(active) {
@@ -573,9 +591,16 @@
 
   function handleFocusChange() {
     setTimeout(() => {
+      if (isUiDragging) {
+        setUiVisible(true);
+        return;
+      }
       const target = getEditableTarget();
       const shouldShow = Boolean(target);
       setUiVisible(shouldShow);
+      if (shouldShow) {
+        uiPositioning?.refreshPosition();
+      }
       if (!shouldShow && isActive) {
         stopRecognitionInternal(false);
       }

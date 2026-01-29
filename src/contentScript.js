@@ -40,6 +40,7 @@
 
   const dom = buildUi();
   setUiVisible(false);
+  setupUiPositioning();
 
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
@@ -123,11 +124,13 @@
     };
   }
 
+  let suppressNextClick = false;
   dom.button.addEventListener("click", () => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     toggleRecognition();
-  });
-  dom.button.addEventListener("mousedown", (event) => {
-    event.preventDefault();
   });
 
   document.addEventListener("focusin", handleFocusChange, true);
@@ -387,6 +390,177 @@
     host.append(container);
 
     return { button, status, container };
+  }
+
+  function setupUiPositioning() {
+    const uiPositionStorageKey = `chromeSttUiPosition:${location.origin}`;
+    const dragState = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      originX: 0,
+      originY: 0,
+      dragging: false,
+      rafId: 0,
+      pendingX: 0,
+      pendingY: 0
+    };
+    // WHY: Small cursor jitter should not cancel click-to-toggle.
+    const dragThresholdPx = 6;
+    let storedPosition = null;
+
+    restorePosition();
+
+    dom.container.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      dragState.pointerId = event.pointerId;
+      dragState.startX = event.clientX;
+      dragState.startY = event.clientY;
+      const rect = dom.container.getBoundingClientRect();
+      dragState.originX = rect.left;
+      dragState.originY = rect.top;
+      dragState.dragging = false;
+      dom.container.setPointerCapture(event.pointerId);
+    });
+
+    dom.container.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== dragState.pointerId) {
+        return;
+      }
+      const deltaX = event.clientX - dragState.startX;
+      const deltaY = event.clientY - dragState.startY;
+      if (!dragState.dragging) {
+        if (Math.hypot(deltaX, deltaY) < dragThresholdPx) {
+          return;
+        }
+        dragState.dragging = true;
+        dom.container.classList.add("chrome-stt-root--dragging");
+      }
+      schedulePositionUpdate(dragState.originX + deltaX, dragState.originY + deltaY);
+      event.preventDefault();
+    });
+
+    dom.container.addEventListener("pointerup", (event) => {
+      if (event.pointerId !== dragState.pointerId) {
+        return;
+      }
+      if (dragState.dragging) {
+        suppressNextClick = true;
+        if (storedPosition) {
+          savePosition(storedPosition);
+        }
+      }
+      endDrag();
+    });
+
+    dom.container.addEventListener("pointercancel", (event) => {
+      if (event.pointerId !== dragState.pointerId) {
+        return;
+      }
+      endDrag();
+    });
+
+    dom.container.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      resetPosition();
+    });
+
+    window.addEventListener("resize", () => {
+      if (!storedPosition) {
+        return;
+      }
+      const clamped = clampPosition(storedPosition.x, storedPosition.y);
+      applyPosition(clamped, true);
+    });
+
+    function endDrag() {
+      if (dragState.pointerId !== null) {
+        dom.container.releasePointerCapture(dragState.pointerId);
+      }
+      dragState.pointerId = null;
+      dragState.dragging = false;
+      dom.container.classList.remove("chrome-stt-root--dragging");
+      if (dragState.rafId) {
+        cancelAnimationFrame(dragState.rafId);
+        dragState.rafId = 0;
+      }
+    }
+
+    function schedulePositionUpdate(x, y) {
+      dragState.pendingX = x;
+      dragState.pendingY = y;
+      if (dragState.rafId) {
+        return;
+      }
+      dragState.rafId = requestAnimationFrame(() => {
+        dragState.rafId = 0;
+        const clamped = clampPosition(dragState.pendingX, dragState.pendingY);
+        applyPosition(clamped, false);
+      });
+    }
+
+    function clampPosition(x, y) {
+      const rect = dom.container.getBoundingClientRect();
+      const maxX = Math.max(0, window.innerWidth - rect.width);
+      const maxY = Math.max(0, window.innerHeight - rect.height);
+      return {
+        x: Math.max(0, Math.min(x, maxX)),
+        y: Math.max(0, Math.min(y, maxY))
+      };
+    }
+
+    function applyPosition(position, persist) {
+      dom.container.style.left = `${position.x}px`;
+      dom.container.style.top = `${position.y}px`;
+      dom.container.style.right = "auto";
+      dom.container.style.bottom = "auto";
+      storedPosition = { x: position.x, y: position.y };
+      if (persist) {
+        savePosition(storedPosition);
+      }
+    }
+
+    function resetPosition() {
+      storedPosition = null;
+      dom.container.style.left = "";
+      dom.container.style.top = "";
+      dom.container.style.right = "";
+      dom.container.style.bottom = "";
+      chrome.storage?.local?.remove?.(uiPositionStorageKey);
+    }
+
+    function restorePosition() {
+      chrome.storage?.local
+        ?.get([uiPositionStorageKey])
+        .then((result) => {
+          const position = result?.[uiPositionStorageKey];
+          if (!isValidPosition(position)) {
+            return;
+          }
+          const clamped = clampPosition(position.x, position.y);
+          applyPosition(clamped, false);
+        })
+        .catch(() => {
+          // Ignore storage read errors; fall back to default position.
+        });
+    }
+
+    function savePosition(position) {
+      if (!isValidPosition(position)) {
+        return;
+      }
+      chrome.storage?.local?.set?.({ [uiPositionStorageKey]: position });
+    }
+
+    function isValidPosition(position) {
+      return (
+        position &&
+        Number.isFinite(position.x) &&
+        Number.isFinite(position.y)
+      );
+    }
   }
 
   function updateButtonState(active) {

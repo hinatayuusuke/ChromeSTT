@@ -11,6 +11,9 @@
     autoPunctuation: true,
     honorPunctuationCommands: true
   };
+  const UI_POSITIONS_KEY = "uiPositions";
+  const DRAG_THRESHOLD = 6;
+  const POSITION_MARGIN = 12;
 
   chrome.storage?.local
     ?.get(["speechSettings"])
@@ -40,6 +43,24 @@
 
   const dom = buildUi();
   setUiVisible(false);
+  const siteKey = getSiteKey();
+  let suppressNextClick = false;
+  let hasPositioned = false;
+  let currentPosition = null;
+  let pendingPosition = null;
+  let positionRaf = null;
+  const dragState = {
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    originLeft: 0,
+    originTop: 0,
+    pending: false,
+    dragging: false
+  };
+
+  initStoredPosition();
+  setupPositionObservers();
 
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
@@ -123,12 +144,22 @@
     };
   }
 
-  dom.button.addEventListener("click", () => {
+  dom.button.addEventListener("click", (event) => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     toggleRecognition();
   });
   dom.button.addEventListener("mousedown", (event) => {
     event.preventDefault();
   });
+  dom.button.addEventListener("pointerdown", handlePointerDown);
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("pointercancel", handlePointerUp);
 
   document.addEventListener("focusin", handleFocusChange, true);
   document.addEventListener("focusout", handleFocusChange, true);
@@ -137,6 +168,11 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "TOGGLE_RECOGNITION") {
       toggleRecognition();
+      sendResponse({ ok: true });
+      return true;
+    }
+    if (message?.type === "RESET_UI_POSITION") {
+      resetPosition();
       sendResponse({ ok: true });
       return true;
     }
@@ -395,6 +431,9 @@
 
   function setUiVisible(visible) {
     dom.container.classList.toggle("chrome-stt-root--hidden", !visible);
+    if (visible) {
+      ensurePositionInViewport();
+    }
   }
 
   function handleFocusChange() {
@@ -406,5 +445,245 @@
         stopRecognitionInternal(false);
       }
     }, 0);
+  }
+
+  function getSiteKey() {
+    if (location.origin && location.origin !== "null") {
+      return location.origin;
+    }
+    return location.href;
+  }
+
+  function isValidPosition(position) {
+    return (
+      position &&
+      Number.isFinite(position.x) &&
+      Number.isFinite(position.y)
+    );
+  }
+
+  function setupPositionObservers() {
+    const resizeObserver = new ResizeObserver(() => {
+      if (hasPositioned) {
+        ensurePositionInViewport();
+      }
+    });
+    resizeObserver.observe(dom.container);
+
+    window.addEventListener("resize", () => {
+      if (hasPositioned) {
+        ensurePositionInViewport();
+      }
+    });
+
+    window.visualViewport?.addEventListener("resize", () => {
+      if (hasPositioned) {
+        ensurePositionInViewport();
+      }
+    });
+  }
+
+  function handlePointerDown(event) {
+    if (event.button !== 0) {
+      return;
+    }
+    dragState.pointerId = event.pointerId;
+    dragState.startX = event.clientX;
+    dragState.startY = event.clientY;
+    const rect = dom.container.getBoundingClientRect();
+    dragState.originLeft = rect.left;
+    dragState.originTop = rect.top;
+    dragState.pending = true;
+    dragState.dragging = false;
+    dom.button.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event) {
+    if (!dragState.pending || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
+    if (!dragState.dragging) {
+      if (Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD) {
+        return;
+      }
+      dragState.dragging = true;
+      dom.container.classList.add("chrome-stt-root--dragging");
+      applyPosition(dragState.originLeft, dragState.originTop);
+    }
+
+    const nextLeft = dragState.originLeft + deltaX;
+    const nextTop = dragState.originTop + deltaY;
+    applyPosition(nextLeft, nextTop);
+  }
+
+  function handlePointerUp(event) {
+    if (!dragState.pending || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    dom.button.releasePointerCapture?.(event.pointerId);
+    if (dragState.dragging) {
+      suppressNextClick = true;
+      if (currentPosition) {
+        savePosition(currentPosition.x, currentPosition.y);
+      }
+    }
+    dragState.pointerId = null;
+    dragState.pending = false;
+    dragState.dragging = false;
+    dom.container.classList.remove("chrome-stt-root--dragging");
+  }
+
+  function getViewportMetrics() {
+    const viewport = window.visualViewport;
+    return {
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+      offsetLeft: viewport?.offsetLeft ?? 0,
+      offsetTop: viewport?.offsetTop ?? 0
+    };
+  }
+
+  function getContainerRect() {
+    const rect = dom.container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      return rect;
+    }
+    const buttonRect = dom.button.getBoundingClientRect();
+    if (buttonRect.width > 0 && buttonRect.height > 0) {
+      return buttonRect;
+    }
+    return rect;
+  }
+
+  function clampToViewport(left, top, rect) {
+    const viewport = getViewportMetrics();
+    const minX = viewport.offsetLeft + POSITION_MARGIN;
+    const minY = viewport.offsetTop + POSITION_MARGIN;
+    const maxX = viewport.offsetLeft + viewport.width - rect.width - POSITION_MARGIN;
+    const maxY = viewport.offsetTop + viewport.height - rect.height - POSITION_MARGIN;
+    const boundedMaxX = Math.max(maxX, minX);
+    const boundedMaxY = Math.max(maxY, minY);
+    return {
+      x: Math.min(Math.max(left, minX), boundedMaxX),
+      y: Math.min(Math.max(top, minY), boundedMaxY)
+    };
+  }
+
+  function applyPosition(left, top) {
+    const rect = getContainerRect();
+    let next = { x: left, y: top };
+    if (rect.width > 0 && rect.height > 0) {
+      next = clampToViewport(left, top, rect);
+    }
+    schedulePositionUpdate(next.x, next.y);
+  }
+
+  function schedulePositionUpdate(left, top) {
+    pendingPosition = { x: left, y: top };
+    if (positionRaf) {
+      return;
+    }
+    positionRaf = requestAnimationFrame(() => {
+      positionRaf = null;
+      if (!pendingPosition) {
+        return;
+      }
+      applyPositionStyles(pendingPosition.x, pendingPosition.y);
+    });
+  }
+
+  function applyPositionStyles(left, top) {
+    hasPositioned = true;
+    currentPosition = { x: left, y: top };
+    dom.container.classList.add("chrome-stt-root--positioned");
+    dom.container.style.left = `${left}px`;
+    dom.container.style.top = `${top}px`;
+    dom.container.style.right = "auto";
+    dom.container.style.bottom = "auto";
+  }
+
+  function ensurePositionInViewport() {
+    if (!hasPositioned || !currentPosition) {
+      return;
+    }
+    applyPosition(currentPosition.x, currentPosition.y);
+  }
+
+  function initStoredPosition() {
+    if (!chrome.storage?.local) {
+      return;
+    }
+    chrome.storage.local
+      .get({ [UI_POSITIONS_KEY]: {} })
+      .then((result) => {
+        const positions = result[UI_POSITIONS_KEY] ?? {};
+        const saved = positions[siteKey];
+        if (!isValidPosition(saved)) {
+          return;
+        }
+        applyPosition(saved.x, saved.y);
+      })
+      .catch(() => {
+        // Ignore storage read errors.
+      });
+  }
+
+  function savePosition(left, top) {
+    if (!chrome.storage?.local) {
+      return;
+    }
+    chrome.storage.local
+      .get({ [UI_POSITIONS_KEY]: {} })
+      .then((result) => {
+        const positions = result[UI_POSITIONS_KEY] ?? {};
+        positions[siteKey] = {
+          x: left,
+          y: top,
+          updatedAt: Date.now()
+        };
+        return chrome.storage.local.set({ [UI_POSITIONS_KEY]: positions });
+      })
+      .catch(() => {
+        // Ignore storage errors.
+      });
+  }
+
+  function resetPosition() {
+    suppressNextClick = false;
+    hasPositioned = false;
+    currentPosition = null;
+    pendingPosition = null;
+    if (positionRaf) {
+      cancelAnimationFrame(positionRaf);
+      positionRaf = null;
+    }
+    dom.container.classList.remove("chrome-stt-root--positioned");
+    dom.container.classList.remove("chrome-stt-root--dragging");
+    dom.container.style.left = "";
+    dom.container.style.top = "";
+    dom.container.style.right = "";
+    dom.container.style.bottom = "";
+    removeStoredPosition();
+  }
+
+  function removeStoredPosition() {
+    if (!chrome.storage?.local) {
+      return;
+    }
+    chrome.storage.local
+      .get({ [UI_POSITIONS_KEY]: {} })
+      .then((result) => {
+        const positions = result[UI_POSITIONS_KEY] ?? {};
+        if (positions[siteKey]) {
+          delete positions[siteKey];
+          return chrome.storage.local.set({ [UI_POSITIONS_KEY]: positions });
+        }
+        return undefined;
+      })
+      .catch(() => {
+        // Ignore storage errors.
+      });
   }
 })();

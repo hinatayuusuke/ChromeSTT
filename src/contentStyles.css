@@ -10,6 +10,20 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+.chrome-stt-root--positioned {
+  bottom: auto;
+  right: auto;
+}
+
+.chrome-stt-root--dragging {
+  cursor: grabbing;
+}
+
+.chrome-stt-root--dragging,
+.chrome-stt-root--dragging * {
+  user-select: none;
+}
+
 .chrome-stt-root--hidden {
   display: none;
 }
@@ -29,6 +43,7 @@
   cursor: pointer;
   transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   padding: 0;
+  touch-action: none;
 }
 
 .chrome-stt-button:hover,
@@ -74,6 +89,10 @@
 .chrome-stt-button--listening {
   background: #dc2626;
   box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.35), 0 15px 30px rgba(220, 38, 38, 0.35);
+}
+
+.chrome-stt-root--dragging .chrome-stt-button {
+  transition: none;
 }
 
 .chrome-stt-status {
